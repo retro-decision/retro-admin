@@ -304,14 +304,21 @@ export function PostsPage() {
       <ConfirmDialog
         open
         title={`封鎖${who}`}
-        message={`確認封鎖此${who}的酒館權限？封鎖後對方不能再發帖、留言、投票、乾杯、追蹤或檢舉。登入與個人決定／雲端備份不受影響。\n用戶 ID：${dialog.userId}`}
+        message={`請選擇禁言時長後確認。封鎖後，在時限內此${who}不能再發帖、留言、投票、乾杯、追蹤或檢舉。登入與個人決定／雲端備份不受影響。\n用戶 ID：${dialog.userId}`}
         confirmLabel="確認封鎖"
         danger
+        durationRequired
         reasonLabel="封鎖原因"
         reasonPlaceholder="例如：重複發布廣告、仇恨言論…"
         busy={busy}
         onCancel={() => setDialog(null)}
-        onConfirm={(reason) => void run(() => blockAccount(dialog.userId, reason, user.id))}
+        onConfirm={(reason, durationDays) => {
+          if (durationDays === undefined) {
+            setError('請選擇禁言時長。');
+            return;
+          }
+          void run(() => blockAccount(dialog.userId, reason, user.id, durationDays));
+        }}
       />
     );
   }

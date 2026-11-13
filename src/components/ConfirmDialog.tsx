@@ -1,4 +1,8 @@
 import { useEffect, useState } from 'react';
+import {
+  MUTE_DURATION_OPTIONS,
+  type MuteDurationDays,
+} from '../lib/format';
 
 type Props = {
   open: boolean;
@@ -10,9 +14,12 @@ type Props = {
   reasonLabel?: string;
   reasonPlaceholder?: string;
   reasonRequired?: boolean;
+  /** When set, the dialog requires a mute duration before confirm. */
+  durationRequired?: boolean;
+  durationLabel?: string;
   busy?: boolean;
   onCancel: () => void;
-  onConfirm: (reason: string) => void;
+  onConfirm: (reason: string, durationDays?: MuteDurationDays) => void;
 };
 
 export function ConfirmDialog({
@@ -25,19 +32,35 @@ export function ConfirmDialog({
   reasonLabel,
   reasonPlaceholder,
   reasonRequired = false,
+  durationRequired = false,
+  durationLabel = '禁言時長',
   busy = false,
   onCancel,
   onConfirm,
 }: Props) {
   const [reason, setReason] = useState('');
+  const [duration, setDuration] = useState<string>('');
 
   useEffect(() => {
-    if (open) setReason('');
+    if (open) {
+      setReason('');
+      setDuration('');
+    }
   }, [open]);
 
   if (!open) return null;
 
-  const canConfirm = !busy && (!reasonRequired || reason.trim().length > 0);
+  const durationDays: MuteDurationDays | undefined =
+    duration === ''
+      ? undefined
+      : duration === 'permanent'
+        ? null
+        : (Number(duration) as MuteDurationDays);
+
+  const canConfirm =
+    !busy &&
+    (!reasonRequired || reason.trim().length > 0) &&
+    (!durationRequired || duration !== '');
 
   return (
     <div className="modal-backdrop" role="presentation" onClick={() => !busy && onCancel()}>
@@ -50,9 +73,45 @@ export function ConfirmDialog({
       >
         <h2 id="confirm-title">{title}</h2>
         <p className="modal-message">{message}</p>
+        {durationRequired ? (
+          <fieldset className="field duration-field">
+            <legend>
+              {durationLabel}
+              <span>（必填）</span>
+            </legend>
+            {durationDays !== undefined ? (
+              <p className="modal-message duration-preview">
+                {durationDays == null
+                  ? '將永久禁言此帳戶。'
+                  : `將禁言此帳戶 ${durationDays} 天。到期後會自動解除。`}
+              </p>
+            ) : null}
+            <div className="duration-options" role="radiogroup" aria-label={durationLabel}>
+              {MUTE_DURATION_OPTIONS.map((opt) => {
+                const value = opt.value == null ? 'permanent' : String(opt.value);
+                return (
+                  <label key={value} className={duration === value ? 'on' : undefined}>
+                    <input
+                      type="radio"
+                      name="mute-duration"
+                      value={value}
+                      checked={duration === value}
+                      disabled={busy}
+                      onChange={() => setDuration(value)}
+                    />
+                    {opt.label}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        ) : null}
         {reasonLabel ? (
           <label className="field">
-            <span>{reasonLabel}{reasonRequired ? '（必填）' : '（選填）'}</span>
+            <span>
+              {reasonLabel}
+              {reasonRequired ? '（必填）' : '（選填）'}
+            </span>
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
@@ -71,7 +130,7 @@ export function ConfirmDialog({
             type="button"
             className={danger ? 'btn btn-danger' : 'btn btn-primary'}
             disabled={!canConfirm}
-            onClick={() => onConfirm(reason)}
+            onClick={() => onConfirm(reason, durationDays)}
           >
             {busy ? '處理中…' : confirmLabel}
           </button>

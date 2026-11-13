@@ -69,3 +69,62 @@ export function displayName(name: string | null | undefined, userId: string): st
   const trimmed = name?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : shortId(userId);
 }
+
+export const MUTE_DURATION_DAYS = [1, 3, 7, 10, 30, 90, 365] as const;
+export type MuteDurationDays = (typeof MUTE_DURATION_DAYS)[number] | null;
+
+export const MUTE_DURATION_OPTIONS: { value: MuteDurationDays; label: string }[] = [
+  ...MUTE_DURATION_DAYS.map((days) => ({ value: days as MuteDurationDays, label: `${days}天` })),
+  { value: null, label: '永久' },
+];
+
+export function isMuteDurationDays(value: number | null): value is MuteDurationDays {
+  return value === null || (MUTE_DURATION_DAYS as readonly number[]).includes(value);
+}
+
+export function muteDurationLabel(days: number | null | undefined): string {
+  if (days == null) return '永久';
+  return `${days}天`;
+}
+
+export type BlockStatus = 'active' | 'expired' | 'lifted';
+
+export function blockStatus(row: {
+  unblocked_at: string | null;
+  unblocked_by?: string | null;
+  unblock_reason?: string | null;
+  expires_at: string | null;
+}): BlockStatus {
+  if (row.unblocked_at) {
+    return row.unblock_reason === 'expired' && !row.unblocked_by ? 'expired' : 'lifted';
+  }
+  if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return 'expired';
+  return 'active';
+}
+
+export function blockStatusLabel(status: BlockStatus): string {
+  if (status === 'expired') return '已到期';
+  if (status === 'lifted') return '已解鎖';
+  return '封鎖中';
+}
+
+export function isBlockActive(row: {
+  unblocked_at: string | null;
+  expires_at: string | null;
+}): boolean {
+  return blockStatus(row) === 'active';
+}
+
+export function blockConfirmCopy(opts: {
+  who?: string;
+  durationDays: MuteDurationDays;
+  userId?: string | null;
+}): string {
+  const who = opts.who ?? '帳戶';
+  const dur = muteDurationLabel(opts.durationDays);
+  const head =
+    opts.durationDays == null
+      ? `確認永久封鎖此${who}的酒館權限？對方將不能再發帖、留言、投票、乾杯、追蹤或檢舉。登入與個人決定／雲端備份不受影響。`
+      : `確認封鎖此${who}的酒館權限 ${dur}？期間內對方不能發帖、留言、投票、乾杯、追蹤或檢舉。到期後會自動解除。登入與個人決定／雲端備份不受影響。`;
+  return opts.userId ? `${head}\n用戶 ID：${opts.userId}` : head;
+}

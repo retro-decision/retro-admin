@@ -9,13 +9,24 @@ import {
   unblockAccount,
   type AccountBlock,
 } from '../lib/api';
-import { displayName, formatHkt, shortId } from '../lib/format';
+import {
+  MUTE_DURATION_OPTIONS,
+  blockConfirmCopy,
+  blockStatus,
+  blockStatusLabel,
+  displayName,
+  formatHkt,
+  isMuteDurationDays,
+  muteDurationLabel,
+  shortId,
+  type MuteDurationDays,
+} from '../lib/format';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type DialogKind =
-  | { type: 'block'; userId: string; reason: string }
+  | { type: 'block'; userId: string; reason: string; durationDays: MuteDurationDays }
   | { type: 'unblock'; row: AccountBlock }
   | null;
 
@@ -27,6 +38,7 @@ export function BlocksPage() {
   const [error, setError] = useState<string | null>(null);
   const [userId, setUserId] = useState('');
   const [reason, setReason] = useState('');
+  const [duration, setDuration] = useState<string>('');
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [busy, setBusy] = useState(false);
 
@@ -50,7 +62,10 @@ export function BlocksPage() {
     void load();
   }, [load]);
 
-  const active = useMemo(() => rows.filter((r) => !r.unblocked_at), [rows]);
+  const active = useMemo(
+    () => rows.filter((r) => blockStatus(r) === 'active'),
+    [rows],
+  );
 
   function who(id: string | null | undefined): string {
     if (!id) return '—';
@@ -68,8 +83,17 @@ export function BlocksPage() {
       setError('請勿封鎖自己的管理員帳戶。');
       return;
     }
+    if (duration === '') {
+      setError('請選擇禁言時長。');
+      return;
+    }
+    const durationDays: MuteDurationDays = duration === 'permanent' ? null : (Number(duration) as MuteDurationDays);
+    if (duration !== 'permanent' && !isMuteDurationDays(durationDays)) {
+      setError('請選擇有效的禁言時長。');
+      return;
+    }
     setError(null);
-    setDialog({ type: 'block', userId: id, reason: reason.trim() });
+    setDialog({ type: 'block', userId: id, reason: reason.trim(), durationDays });
   }
 
   async function run(action: () => Promise<void>) {
@@ -81,6 +105,7 @@ export function BlocksPage() {
       setDialog(null);
       setUserId('');
       setReason('');
+      setDuration('');
       await load();
     } catch (e) {
       setError(e instanceof AdminApiError ? e.message : '操作失敗。');
@@ -89,13 +114,28 @@ export function BlocksPage() {
     }
   }
 
+  function statusPill(row: AccountBlock) {
+    const status = blockStatus(row);
+    const cls = status === 'active' ? 'pill warn' : status === 'expired' ? 'pill expired' : 'pill ok';
+    return <span className={cls}>{blockStatusLabel(status)}</span>;
+  }
+
+  function liftedCell(row: AccountBlock) {
+    if (!row.unblocked_at && blockStatus(row) !== 'expired') return '—';
+    if (row.unblock_reason === 'expired' && !row.unblocked_by) {
+      return '到期自動解除';
+    }
+    if (!row.unblocked_at) return '—';
+    return `${who(row.unblocked_by)}${row.unblock_reason?.trim() ? ` · ${row.unblock_reason.trim()}` : ''}`;
+  }
+
   return (
     <section>
       <div className="page-head">
         <div>
           <h1>封鎖帳戶</h1>
           <p className="muted">
-            封鎖後該用戶不能再參與命運酒館（發帖、留言、投票、乾杯、追蹤、檢舉）。不會禁止登入，也不會刪除個人決定或雲端備份。解鎖後恢復酒館權限；歷史紀錄會保留。
+            可設定禁言 1、3、7、10、30、90、365 天或永久。封鎖後該用戶在時限內不能再參與命運酒館（發帖、留言、投票、乾杯、追蹤、檢舉）。不會禁止登入，也不會刪除個人決定或雲端備份。到期後會自動解除；管理員亦可提早解鎖。歷史紀錄會保留。
           </p>
         </div>
         <button type="button" className="btn btn-ghost" onClick={() => void load()} disabled={loading}>
@@ -117,6 +157,26 @@ export function BlocksPage() {
             spellCheck={false}
           />
         </label>
+        <fieldset className="field duration-field">
+          <legend>禁言時長（必填）</legend>
+          <div className="duration-options" role="radiogroup" aria-label="禁言時長">
+            {MUTE_DURATION_OPTIONS.map((opt) => {
+              const value = opt.value == null ? 'permanent' : String(opt.value);
+              return (
+                <label key={value} className={duration === value ? 'on' : undefined}>
+                  <input
+                    type="radio"
+                    name="block-duration"
+                    value={value}
+                    checked={duration === value}
+                    onChange={() => setDuration(value)}
+                  />
+                  {opt.label}
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
         <label className="field">
           <span>原因（選填）</span>
           <textarea
@@ -144,6 +204,8 @@ export function BlocksPage() {
               <thead>
                 <tr>
                   <th>用戶</th>
+                  <th>禁言時長</th>
+                  <th>到期時間</th>
                   <th>封鎖時間</th>
                   <th>操作者</th>
                   <th>原因</th>
@@ -154,6 +216,8 @@ export function BlocksPage() {
                 {active.map((row) => (
                   <tr key={row.id}>
                     <td title={row.user_id}>{who(row.user_id)}</td>
+                    <td>{muteDurationLabel(row.duration_days)}</td>
+                    <td>{row.expires_at ? formatHkt(row.expires_at) : '永久'}</td>
                     <td>{formatHkt(row.blocked_at)}</td>
                     <td title={row.blocked_by ?? ''}>{who(row.blocked_by)}</td>
                     <td>{row.reason?.trim() || '—'}</td>
@@ -180,6 +244,8 @@ export function BlocksPage() {
                 <tr>
                   <th>用戶</th>
                   <th>狀態</th>
+                  <th>禁言時長</th>
+                  <th>到期時間</th>
                   <th>封鎖時間</th>
                   <th>封鎖者／原因</th>
                   <th>解鎖時間</th>
@@ -190,22 +256,16 @@ export function BlocksPage() {
                 {rows.map((row) => (
                   <tr key={row.id}>
                     <td title={row.user_id}>{who(row.user_id)}</td>
-                    <td>
-                      <span className={row.unblocked_at ? 'pill ok' : 'pill warn'}>
-                        {row.unblocked_at ? '已解鎖' : '封鎖中'}
-                      </span>
-                    </td>
+                    <td>{statusPill(row)}</td>
+                    <td>{muteDurationLabel(row.duration_days)}</td>
+                    <td>{row.expires_at ? formatHkt(row.expires_at) : '永久'}</td>
                     <td>{formatHkt(row.blocked_at)}</td>
                     <td>
                       {who(row.blocked_by)}
                       {row.reason?.trim() ? ` · ${row.reason.trim()}` : ''}
                     </td>
                     <td>{formatHkt(row.unblocked_at)}</td>
-                    <td>
-                      {row.unblocked_at
-                        ? `${who(row.unblocked_by)}${row.unblock_reason?.trim() ? ` · ${row.unblock_reason.trim()}` : ''}`
-                        : '—'}
-                    </td>
+                    <td>{liftedCell(row)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -219,7 +279,7 @@ export function BlocksPage() {
         title="確認封鎖帳戶"
         message={
           dialog?.type === 'block'
-            ? `確認封鎖此帳戶的酒館權限？對方將不能再發帖、留言、投票、乾杯、追蹤或檢舉。\n用戶 ID：${dialog.userId}`
+            ? blockConfirmCopy({ durationDays: dialog.durationDays, userId: dialog.userId })
             : ''
         }
         confirmLabel="確認封鎖"
@@ -228,7 +288,7 @@ export function BlocksPage() {
         onCancel={() => setDialog(null)}
         onConfirm={() => {
           if (dialog?.type !== 'block' || !user) return;
-          void run(() => blockAccount(dialog.userId, dialog.reason, user.id));
+          void run(() => blockAccount(dialog.userId, dialog.reason, user.id, dialog.durationDays));
         }}
       />
 

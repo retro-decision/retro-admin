@@ -15,6 +15,9 @@ function mapError(err: unknown, fallback = '操作失敗，請稍後再試。'):
   if (/account_blocks_already_lifted|account_blocks_immutable/i.test(msg)) {
     throw new AdminApiError('already_lifted', '此封鎖紀錄已解鎖或不可更改。');
   }
+  if (/account_blocks_invalid_duration/i.test(msg)) {
+    throw new AdminApiError('invalid_duration', '請選擇有效的禁言時長（1、3、7、10、30、90、365 天或永久）。');
+  }
   if (/account_blocks_one_active|duplicate|unique|23505/i.test(msg)) {
     throw new AdminApiError('already_blocked', '此帳戶已在封鎖名單中。');
   }
@@ -66,6 +69,8 @@ export type AccountBlock = {
   blocked_at: string;
   blocked_by: string | null;
   reason: string | null;
+  duration_days: number | null;
+  expires_at: string | null;
   unblocked_at: string | null;
   unblocked_by: string | null;
   unblock_reason: string | null;
@@ -175,19 +180,29 @@ export async function listAccountBlocks(): Promise<AccountBlock[]> {
   const { data, error } = await supabase
     .from('account_blocks')
     .select(
-      'id, user_id, blocked_at, blocked_by, reason, unblocked_at, unblocked_by, unblock_reason',
+      'id, user_id, blocked_at, blocked_by, reason, duration_days, expires_at, unblocked_at, unblocked_by, unblock_reason',
     )
     .order('blocked_at', { ascending: false });
   if (error) mapError(error, '無法載入封鎖名單。');
   return (data ?? []) as AccountBlock[];
 }
 
-export async function blockAccount(userId: string, reason: string, adminId: string): Promise<void> {
+export async function blockAccount(
+  userId: string,
+  reason: string,
+  adminId: string,
+  durationDays: number | null,
+): Promise<void> {
+  const allowed = [1, 3, 7, 10, 30, 90, 365];
+  if (durationDays != null && !allowed.includes(durationDays)) {
+    throw new AdminApiError('invalid_duration', '請選擇有效的禁言時長（1、3、7、10、30、90、365 天或永久）。');
+  }
   const trimmed = reason.trim();
   const { error } = await supabase.from('account_blocks').insert({
     user_id: userId.trim(),
     blocked_by: adminId,
     reason: trimmed.length ? trimmed : null,
+    duration_days: durationDays,
   });
   if (error) mapError(error, '無法封鎖此帳戶。');
 }

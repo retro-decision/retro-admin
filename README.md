@@ -13,7 +13,7 @@
 - 檢舉列表：未處理／全部、標為已處理、永久刪帖。
 - 全部帖文：瀏覽命運酒館所有帖文（最新優先，可載入更多），以標題／內文搜尋，並可按語言區、狀態篩選。詳情可見完整內文、圖片、投票選項，以及該帖全部留言（含回覆串）。管理員會看到真實作者／留言者顯示名稱與用戶 ID（即使匿稱發文或留言者是發問者）；可用此 ID 封鎖。可永久刪帖、封鎖作者、刪除單一留言或封鎖留言者。刪留言只刪該則，不會刪帖；該則的回覆會保留並變成獨立留言（`parent_id` 為 ON DELETE SET NULL）。
 - 永久刪帖沿用現有管理員刪帖：對 `help_posts` 做 DELETE，既有 FK CASCADE 會清掉選項、投票、留言、乾杯、追蹤、通知與相關檢舉。刪前需確認。
-- 封鎖／解鎖帳戶（表 `account_blocks`）。封鎖後該用戶不能再發帖、留言、投票、乾杯、追蹤或檢舉（資料庫 RLS + trigger 強制）。不會禁止登入，也不會刪除個人決定或雲端備份。解鎖後恢復酒館權限。名單與操作紀錄都在「封鎖帳戶」頁。
+- 封鎖／解鎖帳戶（表 `account_blocks`）。封鎖時須選擇禁言時長：1、3、7、10、30、90、365 天或永久。封鎖後該用戶在時限內不能再發帖、留言、投票、乾杯、追蹤或檢舉（資料庫 RLS + trigger 強制）。不會禁止登入，也不會刪除個人決定或雲端備份。到期後會自動解除；管理員亦可提早解鎖。名單與操作紀錄都在「封鎖帳戶」頁，並顯示禁言時長、到期時間（香港時間）與狀態（封鎖中／已到期／已解鎖）。
 
 ## 本機啟動
 
@@ -36,14 +36,15 @@ npm run preview  # 預覽 production build（路徑為 /retro-admin/）
 
 - `supabase/migrations/20261113093908_account_blocks_and_tavern_enforcement.sql`（封鎖帳戶與酒館寫入強制）
 - `supabase/migrations/20261113104500_help_comments_delete_admin.sql`（管理員可刪單一留言：`help_comments_delete_admin`，條件為 `is_admin()`）
+- `supabase/migrations/20261113124600_account_blocks_timed_mutes.sql`（禁言時長、到期時間、自動到期解除，以及 `public.my_tavern_mute()`）
 
 請由營運在正式專案（`hrqxdfwuucrknqznrpse`）用 SQL Editor 整份執行尚未套用的檔案，或用你慣用的 CLI。**不要把 `service_role` 放進這個前端。** 套用後不會自動加入管理員。
 
 重點：
 
-- 新表 `public.account_blocks`（`user_id`, `blocked_at`, `blocked_by`, `reason`, `unblocked_at`, `unblocked_by`, `unblock_reason`）。解鎖是標示解除，列會保留作為紀錄。同一用戶同時只能有一筆有效封鎖。
+- 表 `public.account_blocks`（`user_id`, `blocked_at`, `blocked_by`, `reason`, `duration_days`, `expires_at`, `unblocked_at`, `unblocked_by`, `unblock_reason`）。`duration_days` 只允許 1、3、7、10、30、90、365；兩者皆為 NULL 代表永久。`expires_at` 由資料庫依 `blocked_at + duration_days` 寫入，避免客戶端時鐘誤差。解鎖是標示解除，列會保留作為紀錄。同一用戶同時只能有一筆未解鎖列；插入新封鎖前會先把已到期但尚未標記的列標為 `unblock_reason = expired`。有效封鎖 = `unblocked_at` 為空且（`expires_at` 為空或仍未到期）。
 - `private.is_account_blocked(uuid)`、`private.enforce_tavern_not_blocked()`、`private.account_blocks_guard_write()`（SECURITY DEFINER，放在未暴露的 `private` schema）。
-- 前端可呼叫 `public.is_account_blocked()`（無參數，只查目前登入者）。
+- 前端可呼叫 `public.is_account_blocked()`（無參數，只查目前登入者），以及 `public.my_tavern_mute()`（只回傳自己是否被禁言、時長與到期時間，不含管理員 ID 或內部原因）。
 - 對 `help_posts` / `help_options` / `help_comments` / `help_votes` / `help_comment_cheers` / `help_post_follows` / `help_reports` 的寫入政策加上封鎖檢查，並加 trigger。
 - 管理員刪帖沒有另做 RPC，沿用已存在的 `help_posts_delete_admin` 政策。
 
@@ -103,9 +104,9 @@ v1 只做 Google 網頁登入。若要加 Apple 網頁登入，需要額外的 A
 
 手機 App 既有的 iOS Sign in with Apple 不受影響。
 
-## 手機 App 提示（尚未做）
+## 手機 App 提示
 
-現有「檢舉管理」畫面可保留。這次沒有改 `pcjai94/retro`。建議後續在 `helpApi.ts` 的 `mapDbError` 辨識資料庫錯誤 `account_blocked`（以及軟處理 `is_account_blocked()` / `account_blocks` 在 migration 尚未套用時的失敗），給被封鎖用戶一句繁中提示。未套用 SQL 前必須安全降級。
+被禁言的用戶在命運酒館動態牆會看到持續橫幅，寫明禁言天數與解除時間（永久則寫明永久禁言），並列出暫時無法發帖、留言、投票、乾杯、追蹤或檢舉。嘗試這些動作時，也不再顯示泛用的「連線異常」而改為同一則清楚提示。對方仍可瀏覽帖文。實作在 `pcjai94/retro` 的 `helpApi.ts`（`my_tavern_mute()`、`account_blocked` 錯誤對應）。
 
 ## 安全備註
 
