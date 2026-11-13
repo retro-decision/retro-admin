@@ -6,13 +6,14 @@
 - 預設 Pages 網址：https://retro-decision.github.io/retro-admin/
 - 前端只用 anon / publishable key，授權靠 RLS 與 `is_admin()`。**絕對不要把 `service_role` 放進這個 repo、環境變數範例或前端。**
 
-## 功能（v1）
+## 功能
 
 - Google 登入。只有 `help_admins` / `is_admin()` 為 true 的帳戶可以進入。
 - 非管理員只會看到拒絕頁，不會看到任何檢舉、帖文或封鎖資料。
 - 檢舉列表：未處理／全部、標為已處理、永久刪帖。
+- 全部帖文：瀏覽命運酒館所有帖文（最新優先，可載入更多），以標題／內文搜尋，並可按語言區、狀態篩選。詳情可見完整內文、圖片、投票選項，以及該帖全部留言（含回覆串）。管理員會看到真實作者／留言者顯示名稱與用戶 ID（即使匿稱發文或留言者是發問者）；可用此 ID 封鎖。可永久刪帖、封鎖作者、刪除單一留言或封鎖留言者。刪留言只刪該則，不會刪帖；該則的回覆會保留並變成獨立留言（`parent_id` 為 ON DELETE SET NULL）。
 - 永久刪帖沿用現有管理員刪帖：對 `help_posts` 做 DELETE，既有 FK CASCADE 會清掉選項、投票、留言、乾杯、追蹤、通知與相關檢舉。刪前需確認。
-- 封鎖／解鎖帳戶（新表 `account_blocks`）。封鎖後該用戶不能再發帖、留言、投票、乾杯、追蹤或檢舉（資料庫 RLS + trigger 強制）。不會禁止登入，也不會刪除個人決定或雲端備份。解鎖後恢復酒館權限。名單與操作紀錄都在「封鎖帳戶」頁。
+- 封鎖／解鎖帳戶（表 `account_blocks`）。封鎖後該用戶不能再發帖、留言、投票、乾杯、追蹤或檢舉（資料庫 RLS + trigger 強制）。不會禁止登入，也不會刪除個人決定或雲端備份。解鎖後恢復酒館權限。名單與操作紀錄都在「封鎖帳戶」頁。
 
 ## 本機啟動
 
@@ -29,13 +30,14 @@ npm run build    # 會跑 TypeScript 檢查
 npm run preview  # 預覽 production build（路徑為 /retro-admin/）
 ```
 
-## 資料庫 migration（尚未套用到正式專案）
+## 資料庫 migration
 
 檔案：
 
-- `supabase/migrations/20261113093908_account_blocks_and_tavern_enforcement.sql`
+- `supabase/migrations/20261113093908_account_blocks_and_tavern_enforcement.sql`（封鎖帳戶與酒館寫入強制）
+- `supabase/migrations/20261113104500_help_comments_delete_admin.sql`（管理員可刪單一留言：`help_comments_delete_admin`，條件為 `is_admin()`）
 
-請由營運在正式專案（`hrqxdfwuucrknqznrpse`）用 SQL Editor 整份執行，或用你慣用的 CLI。**不要用這個前端、也不要在未確認前對正式庫套用。** 套用後不會自動加入管理員。
+請由營運在正式專案（`hrqxdfwuucrknqznrpse`）用 SQL Editor 整份執行尚未套用的檔案，或用你慣用的 CLI。**不要把 `service_role` 放進這個前端。** 套用後不會自動加入管理員。
 
 重點：
 
@@ -49,7 +51,7 @@ npm run preview  # 預覽 production build（路徑為 /retro-admin/）
 
 ### 1) 套用 migration
 
-在正式專案 SQL Editor 執行 `supabase/migrations/20261113093908_account_blocks_and_tavern_enforcement.sql`。
+在正式專案 SQL Editor 依序執行 `supabase/migrations/` 內尚未套用的 SQL（封鎖相關、以及管理員刪留言政策）。
 
 ### 2) 加入管理員白名單
 
@@ -107,5 +109,5 @@ v1 只做 Google 網頁登入。若要加 Apple 網頁登入，需要額外的 A
 
 ## 安全備註
 
-- 管理員寫入（標已處理、刪帖、封鎖／解鎖）必須在 `is_admin()` 為 true 時才會成功；非管理員在資料庫層會失敗，不只是前端隱藏按鈕。
+- 管理員寫入（標已處理、刪帖、刪留言、封鎖／解鎖）必須在 `is_admin()` 為 true 時才會成功；非管理員在資料庫層會失敗，不只是前端隱藏按鈕。
 - `help_reports` 的 SELECT 政策本來就允許檢舉人看自己的列。前端會先確認 `is_admin()` 才載入列表，避免把一般用戶自己的檢舉當成管理資料顯示。

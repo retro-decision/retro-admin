@@ -14,6 +14,9 @@ export function Layout() {
           <NavLink to="/reports" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
             檢舉
           </NavLink>
+          <NavLink to="/posts" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
+            全部帖文
+          </NavLink>
           <NavLink to="/blocks" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
             封鎖帳戶
           </NavLink>

@@ -211,3 +211,186 @@ export async function unblockAccount(
   if (error) mapError(error, '無法解鎖此帳戶。');
   if (!data?.length) throw new AdminApiError('generic', '無法解鎖此帳戶（可能已解鎖）。');
 }
+
+export const LANGUAGE_ZONES = ['zh', 'en', 'ja', 'ko', 'intl'] as const;
+export type LanguageZone = (typeof LANGUAGE_ZONES)[number];
+export type HelpPostStatus = 'open' | 'closed';
+
+export type AdminHelpPostListItem = {
+  id: string;
+  author_id: string;
+  title: string;
+  body: string;
+  category: string;
+  is_anonymous: boolean;
+  status: string;
+  language_zone: string;
+  vote_count: number;
+  created_at: string;
+  updated_at: string;
+  image_paths: string[];
+  comment_count: number;
+};
+
+export type AdminHelpOption = {
+  id: string;
+  post_id: string;
+  label: string;
+  tag: string | null;
+  sort_order: number;
+  vote_count: number;
+};
+
+export type AdminHelpComment = {
+  id: string;
+  post_id: string;
+  author_id: string;
+  body: string;
+  parent_id: string | null;
+  created_at: string;
+};
+
+export type AdminHelpPostDetail = AdminHelpPostListItem & {
+  deadline_at: string | null;
+  closed_at: string | null;
+  final_option_id: string | null;
+  options: AdminHelpOption[];
+  comments: AdminHelpComment[];
+};
+
+const POST_LIST_FIELDS =
+  'id, author_id, title, body, category, is_anonymous, status, language_zone, vote_count, created_at, updated_at, image_paths, help_comments(count)';
+
+function parseImagePaths(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((p): p is string => typeof p === 'string' && p.length > 0)
+    : [];
+}
+
+function commentCountFromEmbed(raw: unknown): number {
+  if (Array.isArray(raw) && raw[0] && typeof raw[0] === 'object' && raw[0] !== null && 'count' in raw[0]) {
+    const n = Number((raw[0] as { count: unknown }).count);
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (raw && typeof raw === 'object' && 'count' in raw) {
+    const n = Number((raw as { count: unknown }).count);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
+function mapPostListRow(raw: Record<string, unknown>): AdminHelpPostListItem {
+  return {
+    id: raw.id as string,
+    author_id: raw.author_id as string,
+    title: (raw.title as string) ?? '',
+    body: (raw.body as string) ?? '',
+    category: (raw.category as string) ?? '',
+    is_anonymous: Boolean(raw.is_anonymous),
+    status: (raw.status as string) ?? '',
+    language_zone: (raw.language_zone as string) ?? '',
+    vote_count: Number(raw.vote_count ?? 0),
+    created_at: raw.created_at as string,
+    updated_at: raw.updated_at as string,
+    image_paths: parseImagePaths(raw.image_paths),
+    comment_count: commentCountFromEmbed(raw.help_comments),
+  };
+}
+
+/** Escape a user search string for use inside a quoted PostgREST ilike value. */
+function escapeIlikeOrValue(raw: string): string {
+  return raw.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_').replace(/"/g, '\\"');
+}
+
+export async function listPostsForAdmin(opts: {
+  q?: string;
+  languageZone?: LanguageZone | 'all';
+  status?: HelpPostStatus | 'all';
+  limit?: number;
+  offset?: number;
+}): Promise<{ items: AdminHelpPostListItem[]; hasMore: boolean; total: number }> {
+  const limit = opts.limit ?? 40;
+  const offset = opts.offset ?? 0;
+  let q = supabase
+    .from('help_posts')
+    .select(POST_LIST_FIELDS, { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+  const zone = opts.languageZone;
+  if (zone && zone !== 'all') q = q.eq('language_zone', zone);
+  const status = opts.status;
+  if (status && status !== 'all') q = q.eq('status', status);
+  const needle = opts.q?.trim();
+  if (needle) {
+    const pattern = `%${escapeIlikeOrValue(needle)}%`;
+    q = q.or(`title.ilike."${pattern}",body.ilike."${pattern}"`);
+  }
+  const { data, error, count } = await q;
+  if (error) mapError(error, '無法載入帖文列表。');
+  const items = (data ?? []).map((row) => mapPostListRow(row as Record<string, unknown>));
+  const total = count ?? items.length + offset;
+  return { items, hasMore: offset + items.length < total, total };
+}
+
+export async function fetchPostWithComments(postId: string): Promise<AdminHelpPostDetail | null> {
+  const { data: post, error: postErr } = await supabase
+    .from('help_posts')
+    .select(
+      'id, author_id, title, body, category, is_anonymous, status, language_zone, vote_count, created_at, updated_at, image_paths, deadline_at, closed_at, final_option_id',
+    )
+    .eq('id', postId)
+    .maybeSingle();
+  if (postErr) mapError(postErr, '無法載入帖文。');
+  if (!post) return null;
+
+  const [optionsRes, comments] = await Promise.all([
+    supabase
+      .from('help_options')
+      .select('id, post_id, label, tag, sort_order, vote_count')
+      .eq('post_id', postId)
+      .order('sort_order', { ascending: true }),
+    fetchAllCommentsForPost(postId),
+  ]);
+  if (optionsRes.error) mapError(optionsRes.error, '無法載入投票選項。');
+
+  const list = mapPostListRow(post as Record<string, unknown>);
+  return {
+    ...list,
+    comment_count: comments.length,
+    deadline_at: (post.deadline_at as string | null) ?? null,
+    closed_at: (post.closed_at as string | null) ?? null,
+    final_option_id: (post.final_option_id as string | null) ?? null,
+    options: (optionsRes.data ?? []) as AdminHelpOption[],
+    comments,
+  };
+}
+
+async function fetchAllCommentsForPost(postId: string): Promise<AdminHelpComment[]> {
+  const pageSize = 1000;
+  const all: AdminHelpComment[] = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from('help_comments')
+      .select('id, post_id, author_id, body, parent_id, created_at')
+      .eq('post_id', postId)
+      .order('created_at', { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) mapError(error, '無法載入留言。');
+    const rows = (data ?? []) as AdminHelpComment[];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+export async function adminDeleteHelpComment(commentId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('help_comments')
+    .delete()
+    .eq('id', commentId)
+    .select('id');
+  if (error) mapError(error, '無法刪除留言。');
+  if (!data?.length) throw new AdminApiError('not_found', '留言不存在或已被刪除。');
+}

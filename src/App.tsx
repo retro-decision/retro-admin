@@ -2,6 +2,7 @@ import { HashRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/AuthProvider';
 import { Layout } from './components/Layout';
 import { BlocksPage } from './pages/BlocksPage';
+import { PostsPage } from './pages/PostsPage';
 import { DeniedPage } from './pages/DeniedPage';
 import { LoginPage } from './pages/LoginPage';
 import { ReportsPage } from './pages/ReportsPage';
@@ -31,6 +32,7 @@ export default function App() {
             <Route element={<Layout />}>
               <Route path="/" element={<Navigate to="/reports" replace />} />
               <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/posts" element={<PostsPage />} />
               <Route path="/blocks" element={<BlocksPage />} />
             </Route>
           </Route>

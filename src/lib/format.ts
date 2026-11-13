@@ -13,6 +13,38 @@ export function reasonLabel(reason: string): string {
   return REPORT_REASONS[reason as ReportReason] ?? reason;
 }
 
+export const LANGUAGE_ZONES = ['zh', 'en', 'ja', 'ko', 'intl'] as const;
+export type LanguageZone = (typeof LANGUAGE_ZONES)[number];
+
+export const LANGUAGE_ZONE_LABELS: Record<LanguageZone, string> = {
+  zh: '中文',
+  en: '英文',
+  ja: '日文',
+  ko: '韓文',
+  intl: '國際',
+};
+
+export function zoneLabel(zone: string | null | undefined): string {
+  if (!zone) return '—';
+  return LANGUAGE_ZONE_LABELS[zone as LanguageZone] ?? zone;
+}
+
+export function isLanguageZone(value: string): value is LanguageZone {
+  return (LANGUAGE_ZONES as readonly string[]).includes(value);
+}
+
+export function statusLabel(status: string | null | undefined): string {
+  if (status === 'open') return '投票中';
+  if (status === 'closed') return '已截止';
+  return status?.trim() || '—';
+}
+
+export function previewText(text: string | null | undefined, max = 80): string {
+  const t = text?.replace(/\s+/g, ' ').trim() ?? '';
+  if (!t) return '';
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
 export function formatHkt(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
